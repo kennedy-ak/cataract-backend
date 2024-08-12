@@ -52,7 +52,7 @@ class MainPage extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          stops: [0.5, 2.0], // Add stops to control the space distribution
+          stops: [0.5, 2.0], // Adding stops to control the space distribution
           colors: [
             Color.fromARGB(255, 12, 131, 200),
             Color.fromARGB(255, 5, 232, 186),
@@ -65,13 +65,6 @@ class MainPage extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 5),
               child: Container(
-                // decoration: BoxDecoration(
-                //   border: Border.all(
-                //     color: Colors.white,
-                //     width: 2,
-                //   ),
-                //   borderRadius: BorderRadius.circular(10),
-                // ),
                 child: const Image(
                   image: AssetImage(
                     'images/i-Speye.png',
@@ -94,28 +87,22 @@ class MainPage extends StatelessWidget {
                   fontFamily: 'InriaSans'),
             ),
           ),
-          // SingleChildScrollView(
-          // child:
           Container(
-            // height: 1400,
             alignment: Alignment.center,
             child: const Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 BulletedList(
                   listItems: [
-                    'Take the picture indoors in a well-lit room',
+                    'Take the picture indoors in a well-lit room (preferably by natural light)',
                     'Remove glasses or contact lenses',
                     'Hold the rear camera at eye level',
-                    "Use the camera's flash or a bright light",
+                    "Use the camera's flash or a bright light if in a poorly lit room",
                     'Keep the camera steady - the image should not be blurry',
                     'Open your eyes wide',
                   ],
-                  // listOrder: ListOrder.ordered,
                   bulletType: BulletType.conventional,
                   bulletColor: Colors.white,
-                  
-
                   style: TextStyle(
                       color: Colors.white,
                       fontSize: 14,
@@ -124,53 +111,6 @@ class MainPage extends StatelessWidget {
               ],
             ),
           ),
-          // ),
-          // Container(
-          //   child: ListView(
-          //     shrinkWrap: true,
-          //     children: const [
-          //       ListTile(
-          //         title: Text(
-          //           '1. Take the picture indoors in a well-lit room',
-          //           style: TextStyle(
-          //             color: Colors.white,
-          //           ),
-          //         ),
-          //       ),
-          //       ListTile(
-          //         title: Text('2. Remove glasses or contact lenses',
-          //             style: TextStyle(
-          //               color: Colors.white,
-          //             )),
-          //       ),
-          //       ListTile(
-          //         title: Text('3. Hold the rear camera at eye level',
-          //             style: TextStyle(
-          //               color: Colors.white,
-          //             )),
-          //       ),
-          //       ListTile(
-          //         title: Text("4. Use the camera's flash or a bright light",
-          //             style: TextStyle(
-          //               color: Colors.white,
-          //             )),
-          //       ),
-          //       ListTile(
-          //         title: Text(
-          //             '5. Keep the camera steady - the image should not be blurry',
-          //             style: TextStyle(
-          //               color: Colors.white,
-          //             )),
-          //       ),
-          //       ListTile(
-          //         title: Text('6. Open your eyes wide',
-          //             style: TextStyle(
-          //               color: Colors.white,
-          //             )),
-          //       ),
-          //     ],
-          //   ),
-          // ),
           Builder(
             builder: (context) {
               return Column(
@@ -235,116 +175,4 @@ class MainPage extends StatelessWidget {
   }
 }
 
-// import 'package:flutter/material.dart';
 
-// void main() {
-//   runApp(const MyApp());
-// }
-
-// class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return MaterialApp(
-//       title: 'Cataract Detection',
-//       theme: ThemeData(
-//         primarySwatch: Colors.blue,
-//       ),
-//       home: const ResultPage(),
-//     );
-//   }
-// }
-
-// class ResultPage extends StatelessWidget {
-//   const ResultPage({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('Back', style: TextStyle(color: Colors.white)),
-//         backgroundColor: Colors.transparent,
-//         elevation: 0,
-//         leading: IconButton(
-//           icon: const Icon(Icons.arrow_back),
-//           style:
-//               ButtonStyle(iconColor: MaterialStateProperty.all(Colors.white)),
-//           onPressed: () {
-//             // Handle back button press
-//           },
-//         ),
-//       ),
-//       extendBodyBehindAppBar: true,
-//       body: Container(
-//         decoration: const BoxDecoration(
-//           gradient: LinearGradient(
-//             begin: Alignment.topCenter,
-//             end: Alignment.bottomCenter,
-//             colors: [
-//               Color.fromARGB(255, 44, 137, 218),
-//               Color.fromARGB(179, 250, 247, 247),
-//             ],
-//           ),
-//         ),
-//         child: Center(
-//           child: Padding(
-//             padding: const EdgeInsets.symmetric(horizontal: 20.0),
-//             child: Column(
-//               mainAxisAlignment: MainAxisAlignment.center,
-//               crossAxisAlignment: CrossAxisAlignment.center,
-//               children: [
-//                 const Text(
-//                   'Cataract Detected⚠️',
-//                   textAlign: TextAlign.center,
-//                   style: TextStyle(
-//                     fontSize: 28,
-//                     fontWeight: FontWeight.bold,
-//                     color: Colors.white,
-//                   ),
-//                 ),
-//                 const SizedBox(height: 20),
-//                 const Text(
-//                   'You are advised to consult your eye specialist',
-//                   textAlign: TextAlign.center,
-//                   style: TextStyle(
-//                     fontSize: 16,
-//                     color: Colors.white,
-//                   ),
-//                 ),
-//                 const SizedBox(height: 20),
-//                 const Text(
-//                   'Kindly note that this should not be used as a sole diagnostic tool',
-//                   textAlign: TextAlign.center,
-//                   style: TextStyle(
-//                     fontSize: 14,
-//                     fontStyle: FontStyle.italic,
-//                     color: Colors.white70,
-//                   ),
-//                 ),
-//                 const SizedBox(height: 50),
-//                 ElevatedButton(
-//                   onPressed: () {
-//                     // Handle download result button press
-//                   },
-//                   style: ElevatedButton.styleFrom(
-//                     backgroundColor: Colors.black, // button background color
-//                     shape: RoundedRectangleBorder(
-//                       borderRadius: BorderRadius.circular(15),
-//                     ),
-//                     padding: const EdgeInsets.symmetric(
-//                         horizontal: 40, vertical: 15),
-//                   ),
-//                   child: const Text(
-//                     'Download Result',
-//                     style: TextStyle(color: Colors.white, fontSize: 16),
-//                   ),
-//                 ),
-//               ],
-//             ),
-//           ),
-//         ),
-//       ),
-//     );
-//   }
-// }

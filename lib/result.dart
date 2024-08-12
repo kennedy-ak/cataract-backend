@@ -1,16 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-// import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:open_file/open_file.dart';
+import 'package:open_file_plus/open_file_plus.dart';
 import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
-// import 'dart:html' as html;
 import 'package:universal_html/html.dart' as html;
-
-
 
 class ResultsPage extends StatelessWidget {
   final double prediction;
@@ -35,12 +31,13 @@ class ResultsPage extends StatelessWidget {
       Uint8List pdfBytes, BuildContext context) async {
     // Request necessary permissions
     try {
-      PermissionStatus storageStatus = await Permission.storage.status;
+      PermissionStatus storageStatus =
+          await Permission.manageExternalStorage.status;
       PermissionStatus manageStorageStatus =
           await Permission.manageExternalStorage.status;
 
       if (!storageStatus.isGranted || !manageStorageStatus.isGranted) {
-        storageStatus = await Permission.storage.request();
+        storageStatus = await Permission.manageExternalStorage.request();
         manageStorageStatus = await Permission.manageExternalStorage.request();
       }
 
@@ -61,6 +58,7 @@ class ResultsPage extends StatelessWidget {
         );
 
         OpenFile.open(file.path);
+
       } else if (storageStatus.isPermanentlyDenied ||
           manageStorageStatus.isPermanentlyDenied) {
         openAppSettings();
@@ -97,8 +95,11 @@ class ResultsPage extends StatelessWidget {
 
   Future<void> _createAndDownloadReport(BuildContext context) async {
     final pdf = pw.Document();
-    double nocat_certainty = ((prediction - 0.7) / (1.0 - 0.7)) * 100;
-    double cat_certainty = (1 - (prediction / 0.7)) * 100;
+
+    double confidence =
+        prediction > 0.7 ? (prediction * 100) : ((1 - prediction) * 100);
+
+    
     pdf.addPage(
       pw.Page(
         build: (pw.Context context) => pw.Center(
@@ -141,10 +142,7 @@ class ResultsPage extends StatelessWidget {
                 style:
                     pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
               ),
-              // pw.Bullet(
-              //   text:
-              //       'It is recommended to consult your eye specialist for a more accurate diagnosis.',
-              // ),
+              
               pw.SizedBox(height: 10),
               pw.Center(
                 child: pw.Bullet(
@@ -161,8 +159,8 @@ class ResultsPage extends StatelessWidget {
               pw.SizedBox(height: 10),
               pw.Text(
                 prediction < 0.7
-                    ? '- Certainty of diagnosis: ${cat_certainty.toStringAsFixed(2)} %'
-                    : '- Certainty of diagnosis: ${nocat_certainty.toStringAsFixed(2)} %',
+                    ? '- Certainty of diagnosis: ${confidence.toStringAsFixed(2)} %'
+                    : '- Certainty of diagnosis: ${confidence.toStringAsFixed(2)} %',
                 style: const pw.TextStyle(fontSize: 15),
               ),
               pw.Text(
@@ -207,6 +205,7 @@ class ResultsPage extends StatelessWidget {
           SnackBar(content: Text('Report downloaded successfully! Path:$path')),
         );
         OpenFile.open(path);
+        
       } else {
         final now = DateTime.now();
         final directory = await getApplicationDocumentsDirectory();
@@ -226,7 +225,6 @@ class ResultsPage extends StatelessWidget {
         OpenFile.open(file.path);
       }
     } catch (e) {
-      print('Error downloading report: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to download report: $e')),
       );
@@ -236,6 +234,9 @@ class ResultsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isCataractDetected = prediction < 0.7;
+    double confidence =
+        prediction > 0.7 ? (prediction * 100) : ((1 - prediction) * 100);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Results'),
@@ -299,7 +300,8 @@ class ResultsPage extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              
+              const SizedBox(height: 24),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20.0),
                 child: Text(
@@ -312,7 +314,7 @@ class ResultsPage extends StatelessWidget {
                       fontFamily: 'InriaSans'),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 13),
               const Text(
                 'Kindly note that this should not be used as a sole diagnostic tool',
                 textAlign: TextAlign.center,
@@ -321,7 +323,6 @@ class ResultsPage extends StatelessWidget {
                     fontStyle: FontStyle.italic,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
-                    // decoration: TextDecoration.underline,
                     decorationColor: Colors.white,
                     fontFamily: 'InriaSans'),
               ),

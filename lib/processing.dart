@@ -20,7 +20,7 @@ class _ProcessingPageState extends State<ProcessingPage> {
   Future<void> _startProcessing() async {
     try {
       // Using a Future with a timeout to simulate the image processing
-      await Future.delayed(Duration(seconds: 30), () {
+      await Future.delayed(const Duration(seconds: 30), () {
         if (mounted) {
           setState(() {
             _hasError = true;
