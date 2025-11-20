@@ -1,12 +1,15 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:convert';
 import 'result.dart';
 import 'processing.dart';
-// import 'reportgen.dart';
+import 'services/tflite_model_service.dart';
+import 'services/local_storage_service.dart';
+import 'services/background_sync_service.dart';
 
 class UploadPage extends StatefulWidget {
   final String imagePath;
@@ -47,54 +50,118 @@ class _UploadPageState extends State<UploadPage> {
     );
 
     try {
-      var request = http.MultipartRequest(
-          'POST',
-          Uri.parse(
-              'https://macro-context-425319-h7.uc.r.appspot.com/predict'));
-      final stopwatch = Stopwatch();
-      stopwatch.start();
       if (kIsWeb) {
-        // For web, read the file as bytes
-        request.files.add(http.MultipartFile.fromBytes(
-          'file',
-          await XFile(_imagePath).readAsBytes(),
-          filename: 'upload.png',
-        ));
+        // WEB: Use cloud API (TFLite doesn't work on web)
+        print('Running on web - using cloud API');
+        await _processWithCloudAPI(context);
       } else {
-        // For mobile, use the file path
-        request.files.add(await http.MultipartFile.fromPath(
-          'file',
-          _imagePath,
-        ));
-      }
-
-      var response = await request.send();
-      if (response.statusCode == 200) {
-        // var analysisTime;
-        stopwatch.stop();
-        var elapsed = stopwatch.elapsedMilliseconds / 1000;
-        var responseData = await response.stream.bytesToString();
-        var decodedResponse = json.decode(responseData);
-        var predictionValue =
-            double.parse(decodedResponse['prediction'][0][0].toString());
-        // print(predictionValue.runtimeType);
-        // var analysisTimeValue = decodedResponse['analysis_time'];
-        var analysisTimeValue = elapsed.toStringAsFixed(2);
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-              builder: (context) => ResultsPage(
-                    prediction: predictionValue,
-                    analysisTime: analysisTimeValue,
-                  )),
-        );
-      } else {
-        print('Failed to upload image: ${response.statusCode}');
-        //display an error message to the user
+        // MOBILE: Use local TFLite inference (offline)
+        print('Running on mobile - using local TFLite');
+        await _processWithTFLite(context);
       }
     } catch (e) {
-      print('Error uploading image: $e');
+      print('Error processing image: $e');
+      // Navigate back and show error
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error processing image: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  /// Process using local TFLite (Android/iOS only)
+  Future<void> _processWithTFLite(BuildContext context) async {
+    // Initialize services
+    final modelService = TFLiteModelService();
+    final storageService = LocalStorageService();
+    final syncService = BackgroundSyncService();
+
+    // Read image bytes
+    final imageBytes = await File(_imagePath).readAsBytes();
+
+    // Run local inference
+    final result = await modelService.predict(imageBytes);
+
+    // Save image to local storage with timestamp
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final filename = 'cataract_$timestamp.jpg';
+    final savedImagePath = await storageService.saveImage(imageBytes, filename);
+
+    // Create prediction record
+    final record = PredictionRecord(
+      imagePath: savedImagePath,
+      prediction: result['prediction'],
+      predictedClass: result['class'],
+      className: result['className'],
+      confidence: result['confidence'],
+      inferenceTime: result['inferenceTime'],
+      timestamp: result['timestamp'],
+      uploadStatus: 'pending',
+    );
+
+    // Save to local database
+    await storageService.insertPrediction(record);
+
+    // Trigger background sync if connected
+    if (syncService.isAutoSyncEnabled) {
+      syncService.syncPendingData().catchError((e) {
+        print('Background sync failed: $e');
+      });
+    }
+
+    // Navigate to results page
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ResultsPage(
+          prediction: result['prediction'],
+          analysisTime: result['inferenceTime'].toStringAsFixed(2),
+        ),
+      ),
+    );
+  }
+
+  /// Process using cloud API (Web platform)
+  Future<void> _processWithCloudAPI(BuildContext context) async {
+    var request = http.MultipartRequest(
+      'POST',
+      Uri.parse('https://macro-context-425319-h7.uc.r.appspot.com/predict'),
+    );
+
+    final stopwatch = Stopwatch()..start();
+
+    // Read image as bytes
+    request.files.add(http.MultipartFile.fromBytes(
+      'file',
+      await XFile(_imagePath).readAsBytes(),
+      filename: 'upload.png',
+    ));
+
+    var response = await request.send();
+
+    if (response.statusCode == 200) {
+      stopwatch.stop();
+      var elapsed = stopwatch.elapsedMilliseconds / 1000;
+      var responseData = await response.stream.bytesToString();
+      var decodedResponse = json.decode(responseData);
+      var predictionValue = double.parse(decodedResponse['prediction'][0][0].toString());
+      var analysisTimeValue = elapsed.toStringAsFixed(2);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ResultsPage(
+            prediction: predictionValue,
+            analysisTime: analysisTimeValue,
+          ),
+        ),
+      );
+    } else {
+      throw Exception('Cloud API returned status ${response.statusCode}');
     }
   }
 

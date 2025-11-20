@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:open_file_plus/open_file_plus.dart';
+import 'package:open_filex/open_filex.dart';
 import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:universal_html/html.dart' as html;
@@ -57,7 +57,7 @@ class ResultsPage extends StatelessWidget {
           const SnackBar(content: Text('Report downloaded successfully!')),
         );
 
-        OpenFile.open(file.path);
+        OpenFilex.open(file.path);
 
       } else if (storageStatus.isPermanentlyDenied ||
           manageStorageStatus.isPermanentlyDenied) {
@@ -90,7 +90,7 @@ class ResultsPage extends StatelessWidget {
       const SnackBar(content: Text('Report downloaded successfully!')),
     );
 
-    OpenFile.open(file.path);
+    OpenFilex.open(file.path);
   }
 
   Future<void> _createAndDownloadReport(BuildContext context) async {
@@ -204,7 +204,7 @@ class ResultsPage extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Report downloaded successfully! Path:$path')),
         );
-        OpenFile.open(path);
+        OpenFilex.open(path);
         
       } else {
         final now = DateTime.now();
@@ -222,7 +222,7 @@ class ResultsPage extends StatelessWidget {
                   Text('Report downloaded successfully! path: ${file.path}')),
         );
 
-        OpenFile.open(file.path);
+        OpenFilex.open(file.path);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(

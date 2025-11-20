@@ -1,15 +1,74 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'upload.dart';
 import 'package:bulleted_list/bulleted_list.dart';
+import 'widgets/consent_dialog.dart';
+import 'services/tflite_model_service.dart';
+import 'services/connectivity_service.dart';
+import 'services/background_sync_service.dart';
+import 'dart:io';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize services
+  try {
+    if (!kIsWeb) {
+      // Only initialize TFLite on mobile (Android/iOS)
+      print('Initializing mobile services (TFLite, storage, sync)...');
+      final modelService = TFLiteModelService();
+      await modelService.initialize();
+
+      // Initialize connectivity monitoring
+      final connectivityService = ConnectivityService();
+      await connectivityService.initialize();
+
+      // Initialize background sync
+      final syncService = BackgroundSyncService();
+      await syncService.initialize();
+
+      print('Mobile services initialized successfully');
+    } else {
+      print('Running on web - TFLite not supported, will use cloud API');
+    }
+  } catch (e) {
+    print('Error initializing services: $e');
+  }
+
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Show consent dialog after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showConsentDialogIfNeeded();
+    });
+  }
+
+  Future<void> _showConsentDialogIfNeeded() async {
+    // Only show consent on mobile (where we collect data)
+    if (kIsWeb) {
+      print('Web platform - no data collection, skipping consent dialog');
+      return;
+    }
+
+    final bool consented = await ConsentDialog.show(context);
+    if (!consented) {
+      // User declined - exit app
+      exit(0);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
