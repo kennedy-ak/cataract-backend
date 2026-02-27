@@ -134,6 +134,7 @@ def _predict_ensemble(image_bytes: bytes) -> dict:
     Returns:
         dict with prediction, className, confidence, and model details
     """
+    print(f"\n[Prediction Request]")
     predictions = []
     models_used = []
 
@@ -143,6 +144,9 @@ def _predict_ensemble(image_bytes: bytes) -> dict:
             pred1 = _run_inference(_interpreter1, image_bytes)
             predictions.append(pred1)
             models_used.append("ResNet50")
+            label1 = "Cataract" if pred1 < 0.7 else "Normal"
+            conf1 = (1 - pred1) * 100 if pred1 < 0.7 else pred1 * 100
+            print(f"  ResNet50    -> raw={pred1:.4f}, class={label1}, confidence={conf1:.2f}%")
         except Exception as e:
             print(f"Warning: Model 1 inference failed: {e}")
 
@@ -152,6 +156,9 @@ def _predict_ensemble(image_bytes: bytes) -> dict:
             pred2 = _run_inference(_interpreter2, image_bytes)
             predictions.append(pred2)
             models_used.append("DenseNet121")
+            label2 = "Cataract" if pred2 < 0.7 else "Normal"
+            conf2 = (1 - pred2) * 100 if pred2 < 0.7 else pred2 * 100
+            print(f"  DenseNet121 -> raw={pred2:.4f}, class={label2}, confidence={conf2:.2f}%")
         except Exception as e:
             print(f"Warning: Model 2 inference failed: {e}")
 
@@ -168,6 +175,8 @@ def _predict_ensemble(image_bytes: bytes) -> dict:
     else:
         class_name = "Normal"
         confidence = avg_prediction * 100
+
+    print(f"  Ensemble    -> raw={avg_prediction:.4f}, class={class_name}, confidence={confidence:.2f}%")
 
     return {
         "prediction": round(avg_prediction, 4),
