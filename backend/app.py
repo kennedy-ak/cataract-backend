@@ -1,214 +1,230 @@
 """
-Flask Backend for Cataract Detection Training Data Collection
+FastAPI Backend for Cataract Detection - Dual Model Ensemble
 
-This backend receives images and prediction metadata from the mobile app
-for model training and improvement.
-
-Installation:
-    pip install flask flask-cors pillow
+Accepts eye images via POST /predict, runs inference using TWO TFLite models
+(ResNet50 and EfficientNetB0), and returns the averaged ensemble prediction.
 
 Usage:
-    python app.py
-
-Deployment:
-    - For production, use gunicorn or similar WSGI server
-    - Deploy to Google Cloud Run, AWS, Heroku, etc.
+    uvicorn app:app --host 0.0.0.0 --port 8080
 """
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from werkzeug.utils import secure_filename
-import os
-import json
-from datetime import datetime
-import uuid
+import io
+import time
+import numpy as np
+from PIL import Image
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for mobile app
+app = FastAPI(title="Cataract Detection API - Ensemble")
 
-# Configuration
-UPLOAD_FOLDER = 'training_data/images'
-METADATA_FOLDER = 'training_data/metadata'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp'}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Create directories if they don't exist
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(METADATA_FOLDER, exist_ok=True)
+# ---------------------------------------------------------------------------
+# Model loading – dual model ensemble
+# ---------------------------------------------------------------------------
+MODEL_1_PATH = "resnet50_cataract_99percent_float16.tflite"
+MODEL_2_PATH = "densenet121_cataract.tflite"  # DenseNet121 - excellent for medical imaging
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
-
-
-def allowed_file(filename):
-    """Check if file extension is allowed"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+_interpreter1 = None
+_interpreter2 = None
 
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat()
-    }), 200
+def _load_model(model_path: str):
+    """Load a single TFLite model."""
+    # Try tflite-runtime first (lightweight)
+    try:
+        import tflite_runtime.interpreter as tflite
+        interpreter = tflite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        print(f"Loaded TFLite model from {model_path} (tflite-runtime)")
+        return interpreter
+    except Exception:
+        pass
+
+    # Fall back to TensorFlow's built-in TFLite interpreter
+    try:
+        import tensorflow as tf
+        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        print(f"Loaded TFLite model from {model_path} (tensorflow)")
+        return interpreter
+    except Exception as e:
+        print(f"Warning: Could not load model '{model_path}'. Error: {e}")
+        return None
 
 
-@app.route('/api/training-data', methods=['POST'])
-def upload_training_data():
+def _load_models():
+    """Load both models at startup."""
+    global _interpreter1, _interpreter2
+
+    # Load Model 1 (ResNet50)
+    _interpreter1 = _load_model(MODEL_1_PATH)
+
+    # Load Model 2 (EfficientNetB0)
+    _interpreter2 = _load_model(MODEL_2_PATH)
+
+    # Verify at least one model loaded
+    if _interpreter1 is None and _interpreter2 is None:
+        raise RuntimeError(
+            f"Could not load any model. "
+            "Install tflite-runtime or tensorflow."
+        )
+
+    # Log ensemble status
+    if _interpreter1 and _interpreter2:
+        print("✅ Ensemble mode: Both ResNet50 and DenseNet121 loaded")
+    elif _interpreter1:
+        print(f"⚠️ Single model mode: Only {MODEL_1_PATH} loaded")
+    else:
+        print(f"⚠️ Single model mode: Only {MODEL_2_PATH} loaded")
+
+
+def _run_inference(interpreter, image_bytes: bytes) -> float:
     """
-    Receive training data from mobile app
+    Run inference on a single model and return the raw prediction value.
 
-    Expected data:
-    - image: Image file (multipart/form-data)
-    - metadata: JSON string containing prediction data
+    Args:
+        interpreter: TFLite interpreter instance
+        image_bytes: Raw image bytes
 
     Returns:
-    - 201: Success
-    - 400: Bad request (missing data, invalid format)
-    - 413: File too large
-    - 500: Server error
+        float: Raw prediction value (0-1, where 1 = Normal, 0 = Cataract)
     """
-    try:
-        # Check if image file is present
-        if 'image' not in request.files:
-            return jsonify({'error': 'No image file provided'}), 400
+    if interpreter is None:
+        raise RuntimeError("Model interpreter not loaded")
 
-        image_file = request.files['image']
+    # Get model input details
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
 
-        # Check if filename is empty
-        if image_file.filename == '':
-            return jsonify({'error': 'Empty filename'}), 400
+    # Determine expected input shape
+    input_shape = input_details[0]["shape"]
+    height, width = input_shape[1], input_shape[2]
 
-        # Validate file type
-        if not allowed_file(image_file.filename):
-            return jsonify({
-                'error': f'Invalid file type. Allowed: {", ".join(ALLOWED_EXTENSIONS)}'
-            }), 400
+    # Preprocess image
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img = img.resize((width, height))
+    img_array = np.array(img, dtype=np.float32) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
 
-        # Check if metadata is present
-        if 'metadata' not in request.form:
-            return jsonify({'error': 'No metadata provided'}), 400
+    # Run inference
+    interpreter.set_tensor(input_details[0]["index"], img_array)
+    interpreter.invoke()
+    output = interpreter.get_tensor(output_details[0]["index"])
 
-        # Parse metadata
+    return float(output[0][0])
+
+
+def _predict_ensemble(image_bytes: bytes) -> dict:
+    """
+    Run ensemble inference using both models.
+
+    The ensemble averages predictions from both models:
+    - If both models available: simple average
+    - If only one model available: use that model's prediction
+
+    Args:
+        image_bytes: Raw image bytes
+
+    Returns:
+        dict with prediction, className, confidence, and model details
+    """
+    predictions = []
+    models_used = []
+
+    # Run inference on Model 1 (ResNet50)
+    if _interpreter1 is not None:
         try:
-            metadata = json.loads(request.form['metadata'])
-        except json.JSONDecodeError:
-            return jsonify({'error': 'Invalid JSON metadata'}), 400
+            pred1 = _run_inference(_interpreter1, image_bytes)
+            predictions.append(pred1)
+            models_used.append("ResNet50")
+        except Exception as e:
+            print(f"Warning: Model 1 inference failed: {e}")
 
-        # Validate required metadata fields
-        required_fields = ['prediction', 'predictedClass', 'className', 'confidence', 'timestamp']
-        missing_fields = [field for field in required_fields if field not in metadata]
-        if missing_fields:
-            return jsonify({
-                'error': f'Missing required metadata fields: {", ".join(missing_fields)}'
-            }), 400
+    # Run inference on Model 2 (DenseNet121)
+    if _interpreter2 is not None:
+        try:
+            pred2 = _run_inference(_interpreter2, image_bytes)
+            predictions.append(pred2)
+            models_used.append("DenseNet121")
+        except Exception as e:
+            print(f"Warning: Model 2 inference failed: {e}")
 
-        # Generate unique ID for this submission
-        submission_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
+    if not predictions:
+        raise RuntimeError("No models available for inference")
 
-        # Save image with unique filename
-        file_extension = image_file.filename.rsplit('.', 1)[1].lower()
-        image_filename = f'{submission_id}.{file_extension}'
-        image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
-        image_file.save(image_path)
+    # Average the predictions
+    avg_prediction = sum(predictions) / len(predictions)
 
-        # Prepare complete metadata
-        complete_metadata = {
-            'submissionId': submission_id,
-            'receivedAt': timestamp,
-            'imagePath': image_path,
-            'imageFilename': image_filename,
-            'prediction': metadata['prediction'],
-            'predictedClass': metadata['predictedClass'],
-            'className': metadata['className'],
-            'confidence': metadata['confidence'],
-            'inferenceTime': metadata.get('inferenceTime'),
-            'capturedAt': metadata['timestamp'],
-            'deviceInfo': metadata.get('deviceInfo', {}),
-        }
+    # Determine class (same threshold logic as original)
+    if avg_prediction < 0.7:
+        class_name = "Cataract"
+        confidence = (1 - avg_prediction) * 100
+    else:
+        class_name = "Normal"
+        confidence = avg_prediction * 100
 
-        # Save metadata as JSON
-        metadata_filename = f'{submission_id}.json'
-        metadata_path = os.path.join(METADATA_FOLDER, metadata_filename)
-        with open(metadata_path, 'w') as f:
-            json.dump(complete_metadata, f, indent=2)
-
-        # Log the submission
-        print(f'[{timestamp}] Received training data:')
-        print(f'  - ID: {submission_id}')
-        print(f'  - Class: {metadata["className"]}')
-        print(f'  - Confidence: {metadata["confidence"]:.2f}%')
-        print(f'  - Image saved: {image_filename}')
-
-        return jsonify({
-            'success': True,
-            'submissionId': submission_id,
-            'message': 'Training data received successfully'
-        }), 201
-
-    except Exception as e:
-        print(f'Error processing upload: {str(e)}')
-        return jsonify({
-            'error': 'Internal server error',
-            'message': str(e)
-        }), 500
+    return {
+        "prediction": round(avg_prediction, 4),
+        "className": class_name,
+        "confidence": round(confidence, 2),
+        "modelsUsed": models_used,
+    }
 
 
-@app.route('/api/stats', methods=['GET'])
-def get_stats():
-    """Get statistics about collected data"""
-    try:
-        # Count images
-        image_count = len([f for f in os.listdir(UPLOAD_FOLDER) if os.path.isfile(os.path.join(UPLOAD_FOLDER, f))])
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
-        # Count metadata files
-        metadata_files = [f for f in os.listdir(METADATA_FOLDER) if f.endswith('.json')]
-
-        # Analyze classes
-        class_counts = {'Cataract': 0, 'Normal': 0}
-        for metadata_file in metadata_files:
-            with open(os.path.join(METADATA_FOLDER, metadata_file), 'r') as f:
-                data = json.load(f)
-                class_name = data.get('className', 'Unknown')
-                if class_name in class_counts:
-                    class_counts[class_name] += 1
-
-        return jsonify({
-            'totalSubmissions': len(metadata_files),
-            'totalImages': image_count,
-            'classCounts': class_counts,
-            'timestamp': datetime.utcnow().isoformat()
-        }), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@app.on_event("startup")
+async def startup():
+    _load_models()
 
 
-@app.errorhandler(413)
-def request_entity_too_large(error):
-    """Handle file too large error"""
-    return jsonify({
-        'error': 'File too large',
-        'message': f'Maximum file size is {MAX_FILE_SIZE // (1024 * 1024)}MB'
-    }), 413
+@app.get("/health")
+async def health():
+    """Health check endpoint that also reports model status."""
+    models_loaded = []
+    if _interpreter1 is not None:
+        models_loaded.append("ResNet50")
+    if _interpreter2 is not None:
+        models_loaded.append("DenseNet121")
+
+    return {
+        "status": "healthy",
+        "ensembleMode": len(models_loaded) == 2,
+        "modelsLoaded": models_loaded
+    }
 
 
-if __name__ == '__main__':
-    print('=' * 60)
-    print('Cataract Detection Training Data Collection Backend')
-    print('=' * 60)
-    print(f'Upload folder: {os.path.abspath(UPLOAD_FOLDER)}')
-    print(f'Metadata folder: {os.path.abspath(METADATA_FOLDER)}')
-    print('Endpoints:')
-    print('  - POST /api/training-data : Receive training data')
-    print('  - GET  /api/stats         : Get collection statistics')
-    print('  - GET  /health            : Health check')
-    print('=' * 60)
-    print('\nStarting server...\n')
+@app.post("/predict")
+async def predict(file: UploadFile = File(...)):
+    """
+    Predict cataract using ensemble of models.
 
-    # Run development server
-    # For production, use: gunicorn -w 4 -b 0.0.0.0:8080 app:app
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    Returns:
+        JSON with:
+        - prediction: averaged prediction value (0-1)
+        - className: "Cataract" or "Normal"
+        - confidence: confidence percentage
+        - inferenceTime: time taken for inference
+        - modelsUsed: list of models that were used
+    """
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    start = time.time()
+    result = _predict_ensemble(image_bytes)
+    elapsed = time.time() - start
+    result["inferenceTime"] = round(elapsed, 3)
+
+    return result
