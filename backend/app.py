@@ -1,21 +1,24 @@
 """
-FastAPI Backend for Cataract Detection - Dual Model Ensemble
+FastAPI backend for cataract detection.
 
-Accepts eye images via POST /predict, runs inference using TWO TFLite models
-(ResNet50 and EfficientNetB0), and returns the averaged ensemble prediction.
+Accepts eye images via POST /predict, runs inference using one or two TFLite
+models, and returns either a single-model result or an averaged ensemble.
 
 Usage:
-    uvicorn app:app --host 0.0.0.0 --port 8080
+    uvicorn backend.app:app --host 0.0.0.0 --port 8080
 """
 
 import io
+import os
 import time
-import numpy as np
-from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 
-app = FastAPI(title="Cataract Detection API - Ensemble")
+import numpy as np
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+
+app = FastAPI(title="Cataract Detection API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,95 +27,94 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Model loading – dual model ensemble
-# ---------------------------------------------------------------------------
-MODEL_1_PATH = "resnet50_cataract_99percent_float16.tflite"
-MODEL_2_PATH = "densenet121_cataract.tflite"  # DenseNet121 - excellent for medical imaging
+BASE_DIR = Path(__file__).resolve().parent.parent
+MODEL_PATHS = [
+    ("ResNet50", BASE_DIR / "resnet50_cataract_99percent_float16.tflite"),
+    ("DenseNet121", BASE_DIR / "densenet121_cataract.tflite"),
+]
+ALLOW_TENSORFLOW_FALLBACK = os.getenv("ALLOW_TF_LITE_FALLBACK", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
-_interpreter1 = None
-_interpreter2 = None
+_loaded_models = []
 
 
-def _load_model(model_path: str):
-    """Load a single TFLite model."""
-    # Try tflite-runtime first (lightweight)
+def _create_interpreter(model_path: Path):
+    errors = []
+
     try:
         import tflite_runtime.interpreter as tflite
-        interpreter = tflite.Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
-        print(f"Loaded TFLite model from {model_path} (tflite-runtime)")
-        return interpreter
-    except Exception:
-        pass
 
-    # Fall back to TensorFlow's built-in TFLite interpreter
-    try:
-        import tensorflow as tf
-        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter = tflite.Interpreter(model_path=str(model_path))
         interpreter.allocate_tensors()
-        print(f"Loaded TFLite model from {model_path} (tensorflow)")
+        print(f"Loaded TFLite model from {model_path.name} (tflite-runtime)")
         return interpreter
-    except Exception as e:
-        print(f"Warning: Could not load model '{model_path}'. Error: {e}")
-        return None
+    except Exception as exc:
+        errors.append(f"tflite-runtime: {exc}")
+
+    if ALLOW_TENSORFLOW_FALLBACK:
+        try:
+            import tensorflow as tf
+
+            interpreter = tf.lite.Interpreter(model_path=str(model_path))
+            interpreter.allocate_tensors()
+            print(f"Loaded TFLite model from {model_path.name} (tensorflow)")
+            return interpreter
+        except Exception as exc:
+            errors.append(f"tensorflow: {exc}")
+
+    joined_errors = "; ".join(errors)
+    tf_hint = ""
+    if not ALLOW_TENSORFLOW_FALLBACK:
+        tf_hint = " Set ALLOW_TF_LITE_FALLBACK=1 to permit TensorFlow as a fallback."
+
+    raise RuntimeError(
+        f"Could not load '{model_path.name}'. Install tflite-runtime.{tf_hint} "
+        f"Loader errors: {joined_errors}"
+    )
 
 
 def _load_models():
-    """Load both models at startup."""
-    global _interpreter1, _interpreter2
+    global _loaded_models
 
-    # Load Model 1 (ResNet50)
-    _interpreter1 = _load_model(MODEL_1_PATH)
+    loaded_models = []
+    for model_name, model_path in MODEL_PATHS:
+        if not model_path.exists():
+            print(f"Skipping missing model: {model_path.name}")
+            continue
 
-    # Load Model 2 (EfficientNetB0)
-    _interpreter2 = _load_model(MODEL_2_PATH)
+        interpreter = _create_interpreter(model_path)
+        loaded_models.append((model_name, interpreter))
 
-    # Verify at least one model loaded
-    if _interpreter1 is None and _interpreter2 is None:
+    if not loaded_models:
+        expected = ", ".join(path.name for _, path in MODEL_PATHS)
         raise RuntimeError(
-            f"Could not load any model. "
-            "Install tflite-runtime or tensorflow."
+            f"No models could be loaded. Expected at least one of: {expected}"
         )
 
-    # Log ensemble status
-    if _interpreter1 and _interpreter2:
-        print("✅ Ensemble mode: Both ResNet50 and DenseNet121 loaded")
-    elif _interpreter1:
-        print(f"⚠️ Single model mode: Only {MODEL_1_PATH} loaded")
+    _loaded_models = loaded_models
+
+    model_names = ", ".join(model_name for model_name, _ in _loaded_models)
+    if len(_loaded_models) > 1:
+        print(f"Ensemble mode enabled: {model_names}")
     else:
-        print(f"⚠️ Single model mode: Only {MODEL_2_PATH} loaded")
+        print(f"Single-model mode enabled: {model_names}")
 
 
 def _run_inference(interpreter, image_bytes: bytes) -> float:
-    """
-    Run inference on a single model and return the raw prediction value.
-
-    Args:
-        interpreter: TFLite interpreter instance
-        image_bytes: Raw image bytes
-
-    Returns:
-        float: Raw prediction value (0-1, where 1 = Normal, 0 = Cataract)
-    """
-    if interpreter is None:
-        raise RuntimeError("Model interpreter not loaded")
-
-    # Get model input details
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
 
-    # Determine expected input shape
     input_shape = input_details[0]["shape"]
     height, width = input_shape[1], input_shape[2]
 
-    # Preprocess image
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     img = img.resize((width, height))
     img_array = np.array(img, dtype=np.float32) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
 
-    # Run inference
     interpreter.set_tensor(input_details[0]["index"], img_array)
     interpreter.invoke()
     output = interpreter.get_tensor(output_details[0]["index"])
@@ -120,55 +122,20 @@ def _run_inference(interpreter, image_bytes: bytes) -> float:
     return float(output[0][0])
 
 
-def _predict_ensemble(image_bytes: bytes) -> dict:
-    """
-    Run ensemble inference using both models.
+def _predict(image_bytes: bytes) -> dict:
+    if not _loaded_models:
+        raise RuntimeError("No model interpreters loaded")
 
-    The ensemble averages predictions from both models:
-    - If both models available: simple average
-    - If only one model available: use that model's prediction
-
-    Args:
-        image_bytes: Raw image bytes
-
-    Returns:
-        dict with prediction, className, confidence, and model details
-    """
-    print(f"\n[Prediction Request]")
     predictions = []
     models_used = []
 
-    # Run inference on Model 1 (ResNet50)
-    if _interpreter1 is not None:
-        try:
-            pred1 = _run_inference(_interpreter1, image_bytes)
-            predictions.append(pred1)
-            models_used.append("ResNet50")
-            label1 = "Cataract" if pred1 < 0.7 else "Normal"
-            conf1 = (1 - pred1) * 100 if pred1 < 0.7 else pred1 * 100
-            print(f"  ResNet50    -> raw={pred1:.4f}, class={label1}, confidence={conf1:.2f}%")
-        except Exception as e:
-            print(f"Warning: Model 1 inference failed: {e}")
+    for model_name, interpreter in _loaded_models:
+        prediction = _run_inference(interpreter, image_bytes)
+        predictions.append(prediction)
+        models_used.append(model_name)
 
-    # Run inference on Model 2 (DenseNet121)
-    if _interpreter2 is not None:
-        try:
-            pred2 = _run_inference(_interpreter2, image_bytes)
-            predictions.append(pred2)
-            models_used.append("DenseNet121")
-            label2 = "Cataract" if pred2 < 0.7 else "Normal"
-            conf2 = (1 - pred2) * 100 if pred2 < 0.7 else pred2 * 100
-            print(f"  DenseNet121 -> raw={pred2:.4f}, class={label2}, confidence={conf2:.2f}%")
-        except Exception as e:
-            print(f"Warning: Model 2 inference failed: {e}")
-
-    if not predictions:
-        raise RuntimeError("No models available for inference")
-
-    # Average the predictions
     avg_prediction = sum(predictions) / len(predictions)
 
-    # Determine class (same threshold logic as original)
     if avg_prediction < 0.7:
         class_name = "Cataract"
         confidence = (1 - avg_prediction) * 100
@@ -176,19 +143,14 @@ def _predict_ensemble(image_bytes: bytes) -> dict:
         class_name = "Normal"
         confidence = avg_prediction * 100
 
-    print(f"  Ensemble    -> raw={avg_prediction:.4f}, class={class_name}, confidence={confidence:.2f}%")
-
     return {
         "prediction": round(avg_prediction, 4),
         "className": class_name,
         "confidence": round(confidence, 2),
         "modelsUsed": models_used,
+        "ensembleMode": len(models_used) > 1,
     }
 
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 @app.on_event("startup")
 async def startup():
@@ -197,33 +159,16 @@ async def startup():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint that also reports model status."""
-    models_loaded = []
-    if _interpreter1 is not None:
-        models_loaded.append("ResNet50")
-    if _interpreter2 is not None:
-        models_loaded.append("DenseNet121")
-
     return {
         "status": "healthy",
-        "ensembleMode": len(models_loaded) == 2,
-        "modelsLoaded": models_loaded
+        "modelsLoaded": [model_name for model_name, _ in _loaded_models],
+        "ensembleMode": len(_loaded_models) > 1,
+        "tensorflowFallbackEnabled": ALLOW_TENSORFLOW_FALLBACK,
     }
 
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """
-    Predict cataract using ensemble of models.
-
-    Returns:
-        JSON with:
-        - prediction: averaged prediction value (0-1)
-        - className: "Cataract" or "Normal"
-        - confidence: confidence percentage
-        - inferenceTime: time taken for inference
-        - modelsUsed: list of models that were used
-    """
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
@@ -232,7 +177,7 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Empty file")
 
     start = time.time()
-    result = _predict_ensemble(image_bytes)
+    result = _predict(image_bytes)
     elapsed = time.time() - start
     result["inferenceTime"] = round(elapsed, 3)
 

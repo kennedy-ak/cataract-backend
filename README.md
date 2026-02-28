@@ -4,7 +4,7 @@ Full-stack cataract detection app with a Flutter frontend and FastAPI backend.
 
 ## Backend (FastAPI)
 
-FastAPI backend that accepts eye images and returns cataract predictions using a dual-model ensemble (ResNet50 + DenseNet121).
+FastAPI backend that accepts eye images and returns cataract predictions using a dual-model ensemble (ResNet50 + DenseNet121) with TFLite.
 
 ### Setup
 
@@ -15,7 +15,13 @@ FastAPI backend that accepts eye images and returns cataract predictions using a
 pip install -r backend/requirements.txt
 ```
 
-3. Place the model file in the backend directory.
+This backend is configured to use `tflite-runtime` by default and does not
+import TensorFlow unless you explicitly set `ALLOW_TF_LITE_FALLBACK=1`.
+
+3. Place the model files in the project root:
+
+- `resnet50_cataract_99percent_float16.tflite`
+- `densenet121_cataract.tflite`
 
 4. Run the server:
 ```bash
@@ -46,7 +52,7 @@ curl -X POST http://localhost:8080/predict \
 #### GET /health
 
 ```json
-{"status": "healthy"}
+{"status": "healthy", "ensembleMode": true}
 ```
 
 ## Frontend (Flutter)
@@ -68,7 +74,7 @@ samples, guidance on mobile development, and a full API reference.
 git clone https://github.com/YOUR_USER/YOUR_REPO.git
 cd YOUR_REPO
 pip install -r backend/requirements.txt
-# copy model file to backend/
+# copy model files to the project root
 uvicorn backend.app:app --host 0.0.0.0 --port 8080
 ```
 

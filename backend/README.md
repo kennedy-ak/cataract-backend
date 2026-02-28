@@ -1,6 +1,6 @@
 # Cataract Detection - FastAPI Backend
 
-FastAPI backend that accepts eye images and returns cataract predictions using a TFLite model.
+FastAPI backend that accepts eye images and returns cataract predictions using one or two TFLite models.
 
 ## Setup
 
@@ -11,17 +11,18 @@ FastAPI backend that accepts eye images and returns cataract predictions using a
 pip install -r requirements.txt
 ```
 
-3. Place the model file in this directory:
+This backend is configured to use `tflite-runtime` by default and does not
+import TensorFlow unless you explicitly set `ALLOW_TF_LITE_FALLBACK=1`.
+
+3. Place the model files in the project root:
 ```
-backend/
-├── app.py
-├── requirements.txt
-└── resnet50_cataract_99percent_float16.tflite  ← copy this here
+resnet50_cataract_99percent_float16.tflite
+densenet121_cataract.tflite
 ```
 
-4. Run the server:
+4. Run the server from the project root:
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8080
+uvicorn backend.app:app --host 0.0.0.0 --port 8080
 ```
 
 ## API Endpoints
@@ -48,7 +49,7 @@ curl -X POST http://localhost:8080/predict \
 ### GET /health
 
 ```json
-{"status": "healthy"}
+{"status": "healthy", "ensembleMode": true}
 ```
 
 ## VPS Deployment
@@ -57,11 +58,11 @@ curl -X POST http://localhost:8080/predict \
 git clone https://github.com/YOUR_USER/YOUR_REPO.git
 cd YOUR_REPO
 pip install -r requirements.txt
-# copy model file here
-uvicorn app:app --host 0.0.0.0 --port 8080
+# copy model files to the project root
+uvicorn backend.app:app --host 0.0.0.0 --port 8080
 ```
 
 For production, run behind a reverse proxy (nginx) with:
 ```bash
-uvicorn app:app --host 127.0.0.1 --port 8080 --workers 2
+uvicorn backend.app:app --host 127.0.0.1 --port 8080 --workers 2
 ```
