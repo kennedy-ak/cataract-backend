@@ -45,6 +45,16 @@ def _create_interpreter(model_path: Path):
     errors = []
 
     try:
+        from ai_edge_litert.interpreter import Interpreter
+
+        interpreter = Interpreter(model_path=str(model_path))
+        interpreter.allocate_tensors()
+        print(f"Loaded TFLite model from {model_path.name} (ai-edge-litert)")
+        return interpreter
+    except Exception as exc:
+        errors.append(f"ai-edge-litert: {exc}")
+
+    try:
         import tflite_runtime.interpreter as tflite
 
         interpreter = tflite.Interpreter(model_path=str(model_path))
@@ -71,7 +81,7 @@ def _create_interpreter(model_path: Path):
         tf_hint = " Set ALLOW_TF_LITE_FALLBACK=1 to permit TensorFlow as a fallback."
 
     raise RuntimeError(
-        f"Could not load '{model_path.name}'. Install tflite-runtime.{tf_hint} "
+        f"Could not load '{model_path.name}'. Install ai-edge-litert (Python 3.12+) or tflite-runtime (Python <=3.11).{tf_hint} "
         f"Loader errors: {joined_errors}"
     )
 
