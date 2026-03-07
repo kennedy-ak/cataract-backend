@@ -30,7 +30,7 @@ app.add_middleware(
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATHS = [
     ("ResNet50", BASE_DIR / "resnet50_cataract_99percent_float16.tflite"),
-    ("DenseNet121", BASE_DIR / "densenet121_cataract.tflite"),
+    ("DenseNet121", BASE_DIR / "densenet121_cataract_converted.tflite"),
 ]
 ALLOW_TENSORFLOW_FALLBACK = os.getenv("ALLOW_TF_LITE_FALLBACK", "").lower() in {
     "1",
@@ -95,8 +95,11 @@ def _load_models():
             print(f"Skipping missing model: {model_path.name}")
             continue
 
-        interpreter = _create_interpreter(model_path)
-        loaded_models.append((model_name, interpreter))
+        try:
+            interpreter = _create_interpreter(model_path)
+            loaded_models.append((model_name, interpreter))
+        except RuntimeError as exc:
+            print(f"WARNING: Skipping {model_path.name} — {exc}")
 
     if not loaded_models:
         expected = ", ".join(path.name for _, path in MODEL_PATHS)
