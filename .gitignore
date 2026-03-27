@@ -1,3 +1,53 @@
 __pycache__/
 *.pyc
 .env
+
+# Claude Code
+.claude/
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins-dependencies
+.packages
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Flutter build output
+build/
+*.apk
+*.app
+
+# Android
+android/.gradle/
+android/local.properties
+android/captures/
+android/app/release/
+
+# iOS/macOS
+ios/.symlinks/
+ios/Flutter/ephemeral/
+ios/Pods/
+macos/Flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# Windows
+windows/flutter/ephemeral/
+
+# Model files (large binary files - training only)
+*.keras
+*.h5
+*.hdf5
+*.pkl
+*.pb
+
+# Training data
+backend/training_data/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
