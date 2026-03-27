@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.pyc
 .env
@@ -7,24 +8,38 @@ __pycache__/
 
 # Flutter/Dart
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .packages
+.pub-cache/
+.pub/
+**/doc/api/
+**/ios/Flutter/.last_build_id
 
 # IDEs
 .idea/
 .vscode/
 *.iml
+*.ipr
+*.iws
+.atom/
+.buildlog/
+.history
 
 # Flutter build output
 build/
 *.apk
 *.app
+*.symbols
+*.map.json
 
 # Android
 android/.gradle/
 android/local.properties
 android/captures/
-android/app/release/
+android/app/debug
+android/app/profile
+android/app/release
 
 # iOS/macOS
 ios/.symlinks/
@@ -51,3 +66,11 @@ backend/training_data/
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
 *.ipynb_checkpoints/
+
+# Miscellaneous
+*.class
+*.log
+*.swp
+.DS_Store
+.svn/
+migrate_working_dir/

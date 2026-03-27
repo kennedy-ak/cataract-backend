@@ -5,7 +5,7 @@ Accepts eye images via POST /predict, runs inference using one or two TFLite
 models, and returns either a single-model result or an averaged ensemble.
 
 Usage:
-    uvicorn app:app --host 0.0.0.0 --port 8080
+    uvicorn backend.app:app --host 0.0.0.0 --port 8080
 """
 
 import io
@@ -27,10 +27,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATHS = [
     ("ResNet50", BASE_DIR / "resnet50_cataract_99percent_float16.tflite"),
-    ("DenseNet121", BASE_DIR / "densenet121_cataract.tflite"),
+    ("DenseNet121", BASE_DIR / "densenet121_cataract_converted.tflite"),
 ]
 ALLOW_TENSORFLOW_FALLBACK = os.getenv("ALLOW_TF_LITE_FALLBACK", "").lower() in {
     "1",
@@ -43,6 +43,16 @@ _loaded_models = []
 
 def _create_interpreter(model_path: Path):
     errors = []
+
+    try:
+        from ai_edge_litert.interpreter import Interpreter
+
+        interpreter = Interpreter(model_path=str(model_path))
+        interpreter.allocate_tensors()
+        print(f"Loaded TFLite model from {model_path.name} (ai-edge-litert)")
+        return interpreter
+    except Exception as exc:
+        errors.append(f"ai-edge-litert: {exc}")
 
     try:
         import tflite_runtime.interpreter as tflite
@@ -71,7 +81,7 @@ def _create_interpreter(model_path: Path):
         tf_hint = " Set ALLOW_TF_LITE_FALLBACK=1 to permit TensorFlow as a fallback."
 
     raise RuntimeError(
-        f"Could not load '{model_path.name}'. Install tflite-runtime.{tf_hint} "
+        f"Could not load '{model_path.name}'. Install ai-edge-litert (Python 3.12+) or tflite-runtime (Python <=3.11).{tf_hint} "
         f"Loader errors: {joined_errors}"
     )
 
@@ -85,8 +95,11 @@ def _load_models():
             print(f"Skipping missing model: {model_path.name}")
             continue
 
-        interpreter = _create_interpreter(model_path)
-        loaded_models.append((model_name, interpreter))
+        try:
+            interpreter = _create_interpreter(model_path)
+            loaded_models.append((model_name, interpreter))
+        except RuntimeError as exc:
+            print(f"WARNING: Skipping {model_path.name} — {exc}")
 
     if not loaded_models:
         expected = ", ".join(path.name for _, path in MODEL_PATHS)
