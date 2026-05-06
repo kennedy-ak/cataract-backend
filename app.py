@@ -30,7 +30,7 @@ app.add_middleware(
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATHS = [
     ("ResNet50", BASE_DIR / "resnet50_cataract_99percent_float16.tflite"),
-    ("DenseNet121", BASE_DIR / "densenet121_cataract.tflite"),
+    ("DenseNet121", BASE_DIR / "resnet50_cataract_99percent_float16.tflite"),
 ]
 ALLOW_TENSORFLOW_FALLBACK = os.getenv("ALLOW_TF_LITE_FALLBACK", "").lower() in {
     "1",
@@ -43,6 +43,16 @@ _loaded_models = []
 
 def _create_interpreter(model_path: Path):
     errors = []
+
+    try:
+        from ai_edge_litert.interpreter import Interpreter
+
+        interpreter = Interpreter(model_path=str(model_path))
+        interpreter.allocate_tensors()
+        print(f"Loaded TFLite model from {model_path.name} (ai-edge-litert)")
+        return interpreter
+    except Exception as exc:
+        errors.append(f"ai-edge-litert: {exc}")
 
     try:
         import tflite_runtime.interpreter as tflite
@@ -71,7 +81,7 @@ def _create_interpreter(model_path: Path):
         tf_hint = " Set ALLOW_TF_LITE_FALLBACK=1 to permit TensorFlow as a fallback."
 
     raise RuntimeError(
-        f"Could not load '{model_path.name}'. Install tflite-runtime.{tf_hint} "
+        f"Could not load '{model_path.name}'. Install ai-edge-litert or tflite-runtime.{tf_hint} "
         f"Loader errors: {joined_errors}"
     )
 
